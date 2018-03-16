@@ -16,8 +16,14 @@
 package resource
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"time"
+
+	"github.com/gogo/protobuf/jsonpb"
+	"github.com/gogo/protobuf/types"
+	log "github.com/sirupsen/logrus"
 
 	"github.com/envoyproxy/go-control-plane/envoy/api/v2"
 	"github.com/envoyproxy/go-control-plane/envoy/api/v2/core"
@@ -27,7 +33,6 @@ import (
 	als "github.com/envoyproxy/go-control-plane/envoy/config/accesslog/v2"
 	alf "github.com/envoyproxy/go-control-plane/envoy/config/filter/accesslog/v2"
 	hcm "github.com/envoyproxy/go-control-plane/envoy/config/filter/network/http_connection_manager/v2"
-	tcp "github.com/envoyproxy/go-control-plane/envoy/config/filter/network/tcp_proxy/v2"
 	"github.com/envoyproxy/go-control-plane/pkg/cache"
 	"github.com/envoyproxy/go-control-plane/pkg/util"
 )
@@ -233,17 +238,69 @@ func MakeHTTPListener(mode string, listenerName string, port uint32, route strin
 	}
 }
 
+// https://www.envoyproxy.io/docs/envoy/latest/api-v1/network_filters/tcp_proxy_filter
+type v1TcpProxyConfig struct {
+	DeprecatedV1 bool `json:"deprecated_v1"`
+	Value        struct {
+		// The prefix to use when emitting statistics.
+		StatPrefix string `json:"stat_prefix"`
+		// The route table for the filter. All filter instances must have a
+		// route table, even if it is empty.
+		RouteConfig v1TcpProxyRoutes `json:"route_config"`
+		// AccessLog
+	} `json:"value"`
+}
+
+// https://www.envoyproxy.io/docs/envoy/latest/api-v1/network_filters/tcp_proxy_filter#route
+type v1TcpProxyRoute struct {
+	// The cluster to connect to when a the downstream network connection
+	// matches the specified criteria.
+	Cluster string `json:"cluster"`
+	// An optional list of IP address subnets in the form “ip_address/xx”.
+	SourceIPList []string `json:"source_ip_list,omitempty"`
+	// An optional string containing a comma-separated list of port numbers or ranges.
+	SourcePorts string `json:"source_ports,omitempty"`
+	// An optional list of IP address subnets in the form “ip_address/xx”. The
+	// criteria is satisfied if the destination IP address of the downstream
+	// connection is contained in at least one of the specified subnets.
+	DestinationIPList []string `json:"destination_ip_list,omitempty"`
+	// An optional string containing a comma-separated list of port numbers or ranges.
+	DestinationPorts string `json:"destination_ports,omitempty"`
+}
+
+// https://www.envoyproxy.io/docs/envoy/latest/api-v1/network_filters/tcp_proxy_filter#route-configuration
+type v1TcpProxyRoutes struct {
+	// An array of route entries that make up the route table.
+	Routes []v1TcpProxyRoute `json:"routes"`
+}
+
 // MakeTCPListener creates a TCP listener for a cluster.
 func MakeTCPListener(listenerName string, port uint32, clusterName string) *v2.Listener {
 	// TCP filter configuration
-	config := &tcp.TcpProxy{
-		StatPrefix: "tcp",
-		Cluster:    clusterName,
+	route := v1TcpProxyRoute{
+		Cluster:          clusterName,
+		SourceIPList:     []string{"127.0.0.1/32"},
+		DestinationPorts: "27017",
 	}
-	pbst, err := util.MessageToStruct(config)
+	routes := v1TcpProxyRoutes{
+		Routes: []v1TcpProxyRoute{route},
+	}
+
+	config := &v1TcpProxyConfig{DeprecatedV1: true}
+	config.Value.StatPrefix = "tcp"
+	config.Value.RouteConfig = routes
+	jconfig, err := json.Marshal(config)
 	if err != nil {
 		panic(err)
 	}
+	log.Infof("jconfig is %#v", jconfig)
+	pbst := &types.Struct{}
+	err = jsonpb.Unmarshal(bytes.NewBuffer(jconfig), pbst)
+	if err != nil {
+		panic(err)
+	}
+	log.Infof("pbst is %#v", pbst)
+
 	return &v2.Listener{
 		Name: listenerName,
 		Address: core.Address{
