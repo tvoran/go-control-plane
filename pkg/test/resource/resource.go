@@ -274,6 +274,19 @@ type v1TcpProxyRoutes struct {
 	Routes []v1TcpProxyRoute `json:"routes"`
 }
 
+func structToPBStruct(s interface{}) (*types.Struct, error) {
+	j, err := json.Marshal(s)
+	if err != nil {
+		return nil, err
+	}
+	pbst := &types.Struct{}
+	err = jsonpb.Unmarshal(bytes.NewBuffer(j), pbst)
+	if err != nil {
+		return nil, err
+	}
+	return pbst, nil
+}
+
 // MakeTCPListener creates a TCP listener for a cluster.
 func MakeTCPListener(listenerName string, port uint32, clusterName string) *v2.Listener {
 	// TCP filter configuration
@@ -285,17 +298,11 @@ func MakeTCPListener(listenerName string, port uint32, clusterName string) *v2.L
 	routes := v1TcpProxyRoutes{
 		Routes: []v1TcpProxyRoute{route},
 	}
-
 	config := &v1TcpProxyConfig{DeprecatedV1: true}
 	config.Value.StatPrefix = "tcp"
 	config.Value.RouteConfig = routes
-	jconfig, err := json.Marshal(config)
-	if err != nil {
-		panic(err)
-	}
-	log.Infof("jconfig is %#v", jconfig)
-	pbst := &types.Struct{}
-	err = jsonpb.Unmarshal(bytes.NewBuffer(jconfig), pbst)
+
+	pbst, err := structToPBStruct(config)
 	if err != nil {
 		panic(err)
 	}
