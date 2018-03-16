@@ -293,7 +293,7 @@ func MakeTCPListener(listenerName string, port uint32, clusterName string) *v2.L
 	route := v1TcpProxyRoute{
 		Cluster:          clusterName,
 		SourceIPList:     []string{"127.0.0.1/32"},
-		DestinationPorts: "27017",
+		DestinationPorts: "9000-9010",
 	}
 	routes := v1TcpProxyRoutes{
 		Routes: []v1TcpProxyRoute{route},
